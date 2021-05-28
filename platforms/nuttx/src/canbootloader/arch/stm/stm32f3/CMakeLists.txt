@@ -1,6 +1,6 @@
 ############################################################################
 #
-#   Copyright (c) 2019 PX4 Development Team. All rights reserved.
+#   Copyright (c) 2021 PX4 Development Team. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -31,11 +31,14 @@
 #
 ############################################################################
 
+include_directories(../../../include)
 
-add_subdirectory(board_critmon)
-add_subdirectory(../stm32_common/board_reset board_reset)
-add_subdirectory(../stm32_common/version version)
-add_subdirectory(../stm32_common/hrt hrt)
-add_subdirectory(../stm32_common/spi spi)
+px4_add_library(arch_canbootloader
+	board_identity.c
+	drivers/can/driver.c
+)
 
-add_subdirectory(watchdog)
+target_link_libraries(arch_canbootloader
+	PRIVATE
+		arch_watchdog_iwdg
+)
