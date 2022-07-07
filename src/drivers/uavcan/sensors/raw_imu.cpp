@@ -35,19 +35,20 @@
  * @author Dmitry Ponomarev <ponomarevda96@gmail.com>
  */
 
-#include "gyro.hpp"
+#include "raw_imu.hpp"
+#include <lib/drivers/accelerometer/PX4Accelerometer.hpp>
 #include <lib/drivers/gyroscope/PX4Gyroscope.hpp>
 
-const char *const UavcanGyroBridge::NAME = "gyro";
+const char *const UavcanRawIMUBridge::NAME = "raw_imu";
 
-UavcanGyroBridge::UavcanGyroBridge(uavcan::INode &node) :
-	UavcanSensorBridgeBase("uavcan_gyro", ORB_ID(sensor_gyro)),
+UavcanRawIMUBridge::UavcanRawIMUBridge(uavcan::INode &node) :
+	UavcanSensorBridgeBase("uavcan_raw_imu", ORB_ID(sensor_accel)),
 	_sub_imu_data(node)
 { }
 
-int UavcanGyroBridge::init()
+int UavcanRawIMUBridge::init()
 {
-	int res = _sub_imu_data.start(ImuCbBinder(this, &UavcanGyroBridge::imu_sub_cb));
+	int res = _sub_imu_data.start(ImuCbBinder(this, &UavcanRawIMUBridge::imu_sub_cb));
 
 	if (res < 0) {
 		DEVICE_LOG("failed to start uavcan sub: %d", res);
@@ -57,9 +58,16 @@ int UavcanGyroBridge::init()
 	return 0;
 }
 
-void UavcanGyroBridge::imu_sub_cb(const uavcan::ReceivedDataStructure<uavcan::equipment::ahrs::RawIMU> &msg)
+void UavcanRawIMUBridge::imu_sub_cb(const uavcan::ReceivedDataStructure<uavcan::equipment::ahrs::RawIMU> &msg)
 {
 	uavcan_bridge::Channel *channel = get_channel_for_node(msg.getSrcNodeID().get());
+
+	hrt_abstime timestamp_sample = msg.timestamp.usec;
+
+	if (timestamp_sample > hrt_absolute_time()) {
+		timestamp_sample = hrt_absolute_time();
+		PX4_WARN("raw_imu timestamp_sample: %llu > hrt_absolute_time: %llu", (unsigned long long)msg.timestamp.usec, (unsigned long long)hrt_absolute_time());
+	}
 
 	if (channel == nullptr) {
 		// Something went wrong - no channel to publish on; return
@@ -67,40 +75,68 @@ void UavcanGyroBridge::imu_sub_cb(const uavcan::ReceivedDataStructure<uavcan::eq
 	}
 
 	// Cast our generic CDev pointer to the sensor-specific driver class
-	PX4Gyroscope *gyro = (PX4Gyroscope *)channel->h_driver;
+	PX4Accelerometer *accel = (PX4Accelerometer *)channel->h_driver;
+
+	if (accel == nullptr) {
+		return;
+	}
+
+	accel->set_error_count(0);
+	accel->update(timestamp_sample, msg.accelerometer_latest[0], msg.accelerometer_latest[1], msg.accelerometer_latest[2]);
+
+	// Cast our generic CDev pointer to the sensor-specific driver class
+	PX4Gyroscope *gyro = (PX4Gyroscope *)channel->h_driver_secondary;
 
 	if (gyro == nullptr) {
 		return;
 	}
 
-	gyro->update(hrt_absolute_time(),
+	gyro->update(timestamp_sample,
 		     msg.rate_gyro_latest[0],
 		     msg.rate_gyro_latest[1],
 		     msg.rate_gyro_latest[2]);
 }
 
-int UavcanGyroBridge::init_driver(uavcan_bridge::Channel *channel)
+int UavcanRawIMUBridge::init_driver(uavcan_bridge::Channel *channel)
 {
 	// update device id as we now know our device node_id
 	DeviceId device_id{_device_id};
 
-	device_id.devid_s.devtype = DRV_GYR_DEVTYPE_UAVCAN;
 	device_id.devid_s.address = static_cast<uint8_t>(channel->node_id);
 
-	channel->h_driver = new PX4Gyroscope(device_id.devid);
+	device_id.devid_s.devtype = DRV_ACC_DEVTYPE_UAVCAN;
+	channel->h_driver = new PX4Accelerometer(device_id.devid);
 
 	if (channel->h_driver == nullptr) {
 		return PX4_ERROR;
 	}
 
-	PX4Gyroscope *gyro = (PX4Gyroscope *)channel->h_driver;
+	PX4Accelerometer *accel = (PX4Accelerometer *)channel->h_driver;
 
-	channel->instance = gyro->get_instance();
+	channel->instance = accel->get_instance();
 
 	if (channel->instance < 0) {
-		PX4_ERR("UavcanGyro: Unable to get a class instance");
-		delete gyro;
+		PX4_ERR("UavcanAccel: Unable to get a class instance");
+		delete accel;
 		channel->h_driver = nullptr;
+		return PX4_ERROR;
+	}
+
+	device_id.devid_s.devtype = DRV_GYR_DEVTYPE_UAVCAN;
+	channel->h_driver_secondary = new PX4Gyroscope(device_id.devid);
+
+	if (channel->h_driver_secondary == nullptr) {
+		return PX4_ERROR;
+	}
+
+	PX4Gyroscope *gyro = (PX4Gyroscope *)channel->h_driver_secondary;
+
+	channel->instance_secondary = gyro->get_instance();
+
+	if (channel->instance_secondary < 0) {
+		PX4_ERR("UavcanGyro: Unable to get a class instance_secondary");
+		delete gyro;
+		channel->h_driver_secondary = nullptr;
 		return PX4_ERROR;
 	}
 

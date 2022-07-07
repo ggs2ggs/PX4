@@ -41,12 +41,12 @@
 
 #include <uavcan/equipment/ahrs/RawIMU.hpp>
 
-class UavcanGyroBridge : public UavcanSensorBridgeBase
+class UavcanRawIMUBridge : public UavcanSensorBridgeBase
 {
 public:
 	static const char *const NAME;
 
-	UavcanGyroBridge(uavcan::INode &node);
+	UavcanRawIMUBridge(uavcan::INode &node);
 
 	const char *get_name() const override { return NAME; }
 
@@ -58,8 +58,8 @@ private:
 
 	int init_driver(uavcan_bridge::Channel *channel) override;
 
-	typedef uavcan::MethodBinder < UavcanGyroBridge *,
-		void (UavcanGyroBridge::*)
+	typedef uavcan::MethodBinder < UavcanRawIMUBridge *,
+		void (UavcanRawIMUBridge::*)
 		(const uavcan::ReceivedDataStructure<uavcan::equipment::ahrs::RawIMU> &) >
 		ImuCbBinder;
 

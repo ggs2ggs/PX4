@@ -89,7 +89,9 @@ struct Channel {
 	int node_id{-1};
 	orb_advert_t orb_advert{nullptr};
 	int instance{-1};
+	int instance_secondary{-1};
 	void *h_driver{nullptr};
+	void *h_driver_secondary{nullptr};
 };
 } // namespace uavcan_bridge
 

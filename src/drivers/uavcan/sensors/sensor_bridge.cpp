@@ -38,18 +38,17 @@
 #include "sensor_bridge.hpp"
 #include <cassert>
 
-#include "accel.hpp"
 #include "airspeed.hpp"
 #include "baro.hpp"
 #include "battery.hpp"
 #include "differential_pressure.hpp"
 #include "flow.hpp"
 #include "gnss.hpp"
-#include "gyro.hpp"
 #include "hygrometer.hpp"
 #include "ice_status.hpp"
 #include "mag.hpp"
 #include "rangefinder.hpp"
+#include "raw_imu.hpp"
 #include "safety_button.hpp"
 
 /*
@@ -126,8 +125,7 @@ void IUavcanSensorBridge::make_all(uavcan::INode &node, List<IUavcanSensorBridge
 	param_get(param_find("UAVCAN_SUB_IMU"), &uavcan_sub_imu);
 
 	if (uavcan_sub_imu != 0) {
-		list.add(new UavcanAccelBridge(node));
-		list.add(new UavcanGyroBridge(node));
+		list.add(new UavcanRawIMUBridge(node));
 	}
 
 	// magnetometer
