@@ -973,6 +973,14 @@ UavcanNode::print_info()
 
 	printf("\n");
 
+	// UAVCAN Time
+	printf("UAVCAN Time:\n");
+	printf("\tPX4 HRT time:   %" PRIu64 "\n", hrt_absolute_time());
+	printf("\tMonotonic time: %" PRIu64 "\n", _node.getMonotonicTime().toUSec());
+	printf("\tUtc time:       %" PRIu64 "\n", _node.getUtcTime().toUSec());
+
+	printf("\n");
+
 	// CAN driver status
 	for (unsigned i = 0; i < _node.getDispatcher().getCanIOManager().getCanDriver().getNumIfaces(); i++) {
 		printf("CAN%u status:\n", unsigned(i + 1));

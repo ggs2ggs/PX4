@@ -162,11 +162,10 @@ px4_add_module(
 		sensors/gnss.cpp
 		sensors/mag.cpp
 		sensors/rangefinder.cpp
-		sensors/accel.cpp
-		sensors/gyro.cpp
 		sensors/ice_status.cpp
 		sensors/hygrometer.cpp
 		sensors/safety_button.cpp
+		sensors/raw_imu.cpp
 
 	MODULE_CONFIG
 		module.yaml
