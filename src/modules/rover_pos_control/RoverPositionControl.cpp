@@ -99,6 +99,10 @@ void RoverPositionControl::parameters_update(bool force)
 				   _param_speed_d.get(),
 				   _param_speed_imax.get(),
 				   _param_gndspeed_max.get());
+		_rate_control.setGains(matrix::Vector3f(0.0, 0.0, _param_rate_p.get()), matrix::Vector3f(0.0, 0.0, _param_rate_i.get()),
+				       matrix::Vector3f(0.0, 0.0, _param_rate_d.get()));
+		_rate_control.setFeedForwardGain(matrix::Vector3f(0.0, 0.0, _param_rate_ff.get()));
+		_rate_control.setIntegratorLimit(matrix::Vector3f(0.0, 0.0, _param_rate_imax.get()));
 	}
 }
 
@@ -148,6 +152,17 @@ RoverPositionControl::manual_control_setpoint_poll()
 
 					_attitude_sp_pub.publish(_att_sp);
 
+				} else if (_control_mode.flag_control_rates_enabled) {
+					// STABILIZED mode generate the attitude setpoint from manual user inputs
+					_rates_sp.roll = 0.0;
+					_rates_sp.pitch = 0.0;
+					_rates_sp.yaw = _manual_control_setpoint.roll;
+					_rates_sp.thrust_body[0] = _manual_control_setpoint.throttle;
+
+					_rates_sp.timestamp = hrt_absolute_time();
+
+					_rates_sp_pub.publish(_rates_sp);
+
 				} else {
 					// Set heading from the manual roll input channel
 					_yaw_control = _manual_control_setpoint.roll; // Nominally yaw: _manual_control_setpoint.yaw;
@@ -178,6 +193,14 @@ RoverPositionControl::attitude_setpoint_poll()
 {
 	if (_att_sp_sub.updated()) {
 		_att_sp_sub.copy(&_att_sp);
+	}
+}
+
+void
+RoverPositionControl::rates_setpoint_poll()
+{
+	if (_rates_sp_sub.updated()) {
+		_rates_sp_sub.copy(&_rates_sp);
 	}
 }
 
@@ -223,6 +246,7 @@ RoverPositionControl::control_position(const matrix::Vector2d &current_position,
 		matrix::Vector2f ground_speed_2d(ground_speed);
 
 		float mission_throttle = _param_throttle_cruise.get();
+		float max_yaw_rate = _param_rate_max.get();
 
 		/* Just control the throttle */
 		if (_param_speed_control_mode.get() == 1) {
@@ -273,21 +297,29 @@ RoverPositionControl::control_position(const matrix::Vector2d &current_position,
 								 prev_wp(1));
 					_gnd_control.navigate_waypoints(prev_wp_local, curr_wp_local, curr_pos_local, ground_speed_2d);
 
-					_throttle_control = mission_throttle;
-
-					float desired_r = ground_speed_2d.norm_squared() / math::abs_t(_gnd_control.nav_lateral_acceleration_demand());
-					float desired_theta = (0.5f * M_PI_F) - atan2f(desired_r, _param_wheel_base.get());
-					float control_effort = (desired_theta / _param_max_turn_angle.get()) * sign(
-								       _gnd_control.nav_lateral_acceleration_demand());
-					control_effort = math::constrain(control_effort, -1.0f, 1.0f);
-					_yaw_control = control_effort;
+					///WIP: Convert Lateral acceleration demand to rate control reference
+					float min_speed = _param_gndspeed_min.get();
+					matrix::Vector2f saturated_speed_2d = (ground_speed_2d.norm() < min_speed) ? ground_speed_2d :
+									      ground_speed_2d.normalized() * min_speed;
+					///TODO: Max yaw rate
+					float desired_yaw_rate = _gnd_control.nav_lateral_acceleration_demand() / saturated_speed_2d.norm();
+					_rates_sp.roll = 0.0;
+					_rates_sp.pitch = 0.0;
+					_rates_sp.yaw = math::constrain(desired_yaw_rate, -max_yaw_rate, max_yaw_rate);
+					_rates_sp.thrust_body[0] = math::constrain(mission_throttle, -1.0f, 1.0f);
+					_rates_sp.timestamp = hrt_absolute_time();
+					_rates_sp_pub.publish(_rates_sp);
 				}
 			}
 			break;
 
 		case STOPPING: {
-				_yaw_control = 0.0f;
-				_throttle_control = 0.0f;
+				_rates_sp.roll = 0.0;
+				_rates_sp.pitch = 0.0;
+				_rates_sp.yaw = 0.0;
+				_rates_sp.thrust_body[0] = 0.0;
+				_rates_sp.timestamp = hrt_absolute_time();
+				_rates_sp_pub.publish(_rates_sp);
 				// Note _prev_wp is different to the local prev_wp which is related to a mission waypoint.
 				float dist_between_waypoints = get_distance_to_next_waypoint((double)_prev_wp(0), (double)_prev_wp(1),
 							       (double)curr_wp(0), (double)curr_wp(1));
@@ -364,17 +396,45 @@ RoverPositionControl::control_attitude(const vehicle_attitude_s &att, const vehi
 	// quaternion attitude control law, qe is rotation from q to qd
 	const Quatf qe = Quatf(att.q).inversed() * Quatf(att_sp.q_d);
 	const Eulerf euler_sp = qe;
+	// PX4_INFO("Yaw error: %f", double(euler_sp(2)));
 
-	float control_effort = euler_sp(2) / _param_max_turn_angle.get();
-	control_effort = math::constrain(control_effort, -1.0f, 1.0f);
-
-	_yaw_control = control_effort;
-
-	const float control_throttle = att_sp.thrust_body[0];
-
-	_throttle_control =  math::constrain(control_throttle, 0.0f, 1.0f);
-
+	_rates_sp.roll = 0.0;
+	_rates_sp.pitch = 0.0;
+	_rates_sp.yaw = euler_sp(2) / _param_max_turn_angle.get();
+	_rates_sp.thrust_body[0] = math::constrain(att_sp.thrust_body[0], 0.0f, 1.0f);
+	_rates_sp.timestamp = hrt_absolute_time();
+	_rates_sp_pub.publish(_rates_sp);
 }
+
+void
+RoverPositionControl::control_rates(const vehicle_angular_velocity_s &rates, const vehicle_local_position_s &local_pos,
+				    const vehicle_rates_setpoint_s &rates_sp)
+{
+	float dt = (_control_rates_last_called > 0) ? hrt_elapsed_time(&_control_rates_last_called) * 1e-6f : 0.01f;
+	_control_rates_last_called = hrt_absolute_time();
+
+	const matrix::Vector3f vehicle_rates(rates.xyz[0], rates.xyz[1], rates.xyz[2]);
+	const matrix::Vector3f rates_setpoint(rates_sp.roll, rates_sp.pitch, rates_sp.yaw);
+
+	const matrix::Vector3f current_velocity(local_pos.vx, local_pos.vy, local_pos.vz);
+	bool lock_integrator = bool(current_velocity.norm() < _param_rate_i_minspeed.get());
+
+	const matrix::Vector3f angular_acceleration{rates.xyz_derivative};
+	const matrix::Vector3f torque = _rate_control.update(vehicle_rates, rates_setpoint, angular_acceleration, dt,
+					lock_integrator);
+	///TODO: Handle mimimum speed constraints
+	float steering_input = math::constrain(torque(2), -1.0f, 1.0f);
+
+	///TODO: Add slew rate constraints
+	_steering_input = steering_input;
+
+	_act_controls.control[actuator_controls_s::INDEX_YAW] = _steering_input;
+
+	const float control_throttle = rates_sp.thrust_body[0];
+
+	_act_controls.control[actuator_controls_s::INDEX_THROTTLE] =  math::constrain(control_throttle, 0.0f, 1.0f);
+}
+
 
 void
 RoverPositionControl::Run()
@@ -382,13 +442,11 @@ RoverPositionControl::Run()
 	parameters_update(true);
 
 	/* run controller on gyro changes */
-	vehicle_angular_velocity_s angular_velocity;
-
-	if (_vehicle_angular_velocity_sub.update(&angular_velocity)) {
-
+	if (_vehicle_angular_velocity_sub.update(&_vehicle_rates)) {
 		/* check vehicle control mode for changes to publication state */
 		vehicle_control_mode_poll();
 		attitude_setpoint_poll();
+		rates_setpoint_poll();
 		vehicle_attitude_poll();
 		manual_control_setpoint_poll();
 
@@ -396,6 +454,10 @@ RoverPositionControl::Run()
 
 		/* update parameters from storage */
 		parameters_update();
+
+		if (!PX4_ISFINITE(_steering_input)) {
+			_steering_input = 0.0;
+		}
 
 		/* only run controller if position changed */
 		if (_local_pos_sub.update(&_local_pos)) {
@@ -471,6 +533,11 @@ RoverPositionControl::Run()
 		    && !_control_mode.flag_control_velocity_enabled) {
 			control_attitude(_vehicle_att, _att_sp);
 
+		}
+
+		//Body Rate control
+		if (_control_mode.flag_control_rates_enabled) {
+			control_rates(_vehicle_rates, _local_pos, _rates_sp);
 		}
 
 		/* Only publish if any of the proper modes are enabled */
