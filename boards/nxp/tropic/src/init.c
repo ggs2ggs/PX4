@@ -76,6 +76,7 @@
 #include <hardware/imxrt_lpuart.h>
 #undef FLEXSPI_LUT_COUNT
 #include <hardware/imxrt_flexspi.h>
+#include <hardware/imxrt_ccm.h>
 
 #include <arch/board/board.h>
 
@@ -90,6 +91,11 @@
 /****************************************************************************
  * Pre-Processor Definitions
  ****************************************************************************/
+
+/* 120Mhz clock for FlexIO using PLL3 */
+#define CONFIG_FLEXIO1_CLK 3
+#define CONFIG_FLEXIO1_PRED_DIVIDER 4
+#define CONFIG_FLEXIO1_PODF_DIVIDER 1
 
 /* Configuration ************************************************************/
 
@@ -318,6 +324,20 @@ int imxrt_phy_boardinitialize(int intf)
 	return OK;
 }
 
+void imxrt_flexio_clocking(void) {
+  uint32_t reg;
+  reg = getreg32(IMXRT_CCM_CDCDR);
+  reg &= ~(CCM_CDCDR_FLEXIO1_CLK_SEL_MASK |
+           CCM_CDCDR_FLEXIO1_CLK_PODF_MASK |
+           CCM_CDCDR_FLEXIO1_CLK_PRED_MASK);
+  reg |= CCM_CDCDR_FLEXIO1_CLK_SEL(CONFIG_FLEXIO1_CLK);
+  reg |= CCM_CDCDR_FLEXIO1_CLK_PODF
+            (CCM_PODF_FROM_DIVISOR(CONFIG_FLEXIO1_PODF_DIVIDER));
+  reg |= CCM_CDCDR_FLEXIO1_CLK_PRED
+            (CCM_PRED_FROM_DIVISOR(CONFIG_FLEXIO1_PRED_DIVIDER));
+  putreg32(reg, IMXRT_CCM_CDCDR);
+}
+
 
 /****************************************************************************
  * Name: board_app_initialize
@@ -345,6 +365,7 @@ int imxrt_phy_boardinitialize(int intf)
  ****************************************************************************/
 __EXPORT int board_app_initialize(uintptr_t arg)
 {
+	imxrt_flexio_clocking();
 
 	/* Power on Interfaces */
 
