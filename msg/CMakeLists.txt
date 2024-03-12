@@ -93,8 +93,6 @@ set(msg_files
 	FigureEightStatus.msg
 	FailsafeFlags.msg
 	FailureDetectorStatus.msg
-	FiducialMarkerPosReport.msg
-	FiducialMarkerYawReport.msg
 	FlightPhaseEstimation.msg
 	FollowTarget.msg
 	FollowTargetEstimator.msg
@@ -247,8 +245,6 @@ set(msg_files
 	VehicleTrajectoryBezier.msg
 	VehicleTrajectoryWaypoint.msg
 	VelocityLimits.msg
-	VisionTargetEstPosition.msg
-	VisionTargetEstOrientation.msg
 	VtolVehicleStatus.msg
 	WheelEncoders.msg
 	Wind.msg
