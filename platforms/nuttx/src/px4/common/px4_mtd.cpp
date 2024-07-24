@@ -77,7 +77,7 @@ static int ramtron_attach(mtd_instance_s &instance)
 
 	/* start the RAMTRON driver, attempt 10 times */
 
-	int spi_speed_mhz = 10;
+	int spi_speed_mhz = BOARD_SPI_RAMTRON_SPEED_MHZ;
 
 	for (int i = 0; i < 10; i++) {
 		/* initialize the right spi */
